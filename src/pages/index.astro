@@ -4,8 +4,9 @@ import Bookmarks from '../components/Bookmarks.astro';
 ---
 <Base title="Mona's Bookmark Manager App">
   <header>
-    <h1>🔖 Mona's Bookmark Manager App</h1>
-    <p class="tagline">Save a link and get a short, shareable <code>mona-</code> slug — no account needed.</p>
+    <p class="eyebrow">Good links deserve a home</p>
+    <h1><span aria-hidden="true">🔖</span> Mona's Bookmark Manager App</h1>
+    <p class="tagline">Keep your next great read, useful find, or tiny inspiration. One link, one little <code>mona-</code> alias — no account needed.</p>
   </header>
 
   <main>
@@ -13,6 +14,7 @@ import Bookmarks from '../components/Bookmarks.astro';
   </main>
 
   <footer>
-    Your bookmarks stay on this device, saved in your browser.
+    <p>Your collection stays on this device, saved in your browser.</p>
+    <p>Slugs are local labels, not shortened URLs. Links open the original page in a new tab.</p>
   </footer>
 </Base>

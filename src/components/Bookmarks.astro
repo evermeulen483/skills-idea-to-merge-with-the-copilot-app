@@ -1,70 +1,174 @@
----
-// Bookmarks component (scaffold).
-//
-// The markup below renders during the static build. The dynamic behavior —
-// adding a bookmark, generating a short slug, and persisting to the browser —
-// must run ONLY in the client-side <script> boundary at the bottom of this
-// file. Astro runs that script in the browser, never during the build, so
-// browser-only APIs are safe there.
-//
-// You will implement the behavior in Step 3.
----
-<form id="add-bookmark">
-  <div class="field">
-    <label for="url">Link to save</label>
-    <input
-      id="url"
-      name="url"
-      type="text"
-      inputmode="url"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder="https://example.com"
-      required
-    />
+<section class="composer" aria-labelledby="composer-title">
+  <h2 id="composer-title">Found something worth keeping?</h2>
+  <form id="add-bookmark" onsubmit="event.preventDefault()">
+    <div class="field">
+      <label for="url">Link to save</label>
+      <input
+        id="url"
+        name="url"
+        type="text"
+        inputmode="url"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="example.com/something-good"
+        aria-describedby="url-hint bookmark-error"
+        required
+      />
+    </div>
+    <button id="add-button" type="submit" disabled>Add bookmark</button>
+  </form>
+
+  <p id="url-hint" class="hint">With or without https://. We'll give it a little <code>mona-</code> alias.</p>
+  <p id="bookmark-error" class="feedback error" role="alert"></p>
+  <p id="bookmark-status" class="feedback" role="status"></p>
+  <noscript><p>JavaScript is needed to save and view bookmarks on this device.</p></noscript>
+</section>
+
+<section class="collection" aria-label="Your bookmark collection">
+  <div id="empty-state" class="empty">
+    <span class="empty-mark" aria-hidden="true">::</span>
+    <h2>A fresh page for your favorites.</h2>
+    <p>No bookmarks yet — add your first link above.</p>
   </div>
-  <button type="submit">Add bookmark</button>
-</form>
 
-<p class="hint">Paste a URL and select <strong>Add bookmark</strong> to generate its short <code>mona-</code> slug.</p>
+  <div id="list-header" hidden>
+    <h2 class="list-title">Saved bookmarks <span id="bookmark-count" class="count">0</span></h2>
+    <button id="clear-all" type="button" class="clear">Clear all</button>
+  </div>
 
-<p id="empty-state" class="empty">No bookmarks yet — add your first link above.</p>
-
-<div id="list-header" hidden>
-  <h2 class="list-title">Saved bookmarks</h2>
-  <button id="clear-all" type="button" class="clear">Clear all</button>
-</div>
-
-<ul id="bookmark-list" aria-label="Saved bookmarks" aria-live="polite">
-  <!-- Bookmarks render here in the browser. -->
-</ul>
+  <ul id="bookmark-list" aria-label="Saved bookmarks"></ul>
+</section>
 
 <script>
-  // CLIENT-SIDE BOUNDARY — runs in the browser only.
-  //
-  // TODO (Step 3): implement the bookmarks feature here.
-  //   1. On form submit, call event.preventDefault() FIRST so the page
-  //      never reloads, then read and validate the original URL.
-  //   2. Generate a short slug with a "mona-" prefix (for example, base62
-  //      of a counter or hash → "mona-7fk2").
-  //   3. Save the original URL and its slug, then persist them in the browser.
-  //   4. Render each saved bookmark into #bookmark-list as a row (li.bookmark) with:
-  //        - the original URL as a link (.url) that opens in a new tab,
-  //        - its short slug shown as a badge (.slug), and
-  //        - a "Copy" button (.copy) that copies the slug.
-  //   5. Toggle empty vs. saved state: hide #empty-state and show #list-header
-  //      (the "Saved bookmarks" heading + "Clear all" button) once at least one
-  //      bookmark exists; reverse it when the list is empty.
-  //   6. Wire the #clear-all button to remove every saved bookmark (clear the
-  //      list, clear browser storage) after a quick confirm.
-  //   7. On page load, read the saved bookmarks from storage and render
-  //      them so the list persists across reloads.
-  //
-  // Because this code lives in a client <script>, browser storage APIs are
-  // safe to use here without breaking the static build.
+  import {
+    STORAGE_KEY, createBookmark, formatBookmark, loadBookmarks,
+    type Bookmark,
+  } from '../lib/bookmarks';
+
   const form = document.getElementById('add-bookmark');
-  form?.addEventListener('submit', (event) => {
-    event.preventDefault(); // keep this — stops the page from reloading
-    // Implement in Step 3.
+  const input = document.getElementById('url');
+  const addButton = document.getElementById('add-button');
+  const list = document.getElementById('bookmark-list');
+  const listHeader = document.getElementById('list-header');
+  const emptyState = document.getElementById('empty-state');
+  const count = document.getElementById('bookmark-count');
+  const clearButton = document.getElementById('clear-all');
+  const status = document.getElementById('bookmark-status');
+  const error = document.getElementById('bookmark-error');
+
+  if (!(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement)
+    || !(addButton instanceof HTMLButtonElement) || !list || !listHeader
+    || !emptyState || !count || !clearButton || !status || !error) {
+    throw new Error('The bookmark interface could not be initialized.');
+  }
+
+  let bookmarks: Bookmark[] = [];
+  let storageReady = false;
+
+  const report = (message: string, isError = false) => {
+    status.textContent = isError ? '' : message;
+    error.textContent = isError ? message : '';
+  };
+
+  const render = () => {
+    const rows = bookmarks.map((bookmark) => {
+      const row = document.createElement('li');
+      row.className = 'bookmark';
+
+      const link = document.createElement('a');
+      link.className = 'url';
+      link.href = bookmark.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = formatBookmark(bookmark);
+
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'copy';
+      copy.textContent = 'Copy slug';
+      copy.setAttribute('aria-label', `Copy ${bookmark.slug}`);
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(bookmark.slug);
+        } catch {
+          report('Clipboard access is unavailable. Select the slug in the list to copy it manually.', true);
+          return;
+        }
+        report(`Copied ${bookmark.slug}.`);
+      });
+      row.append(link, copy);
+      return row;
+    });
+
+    list.replaceChildren(...rows);
+    emptyState.hidden = bookmarks.length > 0;
+    listHeader.hidden = bookmarks.length === 0;
+    count.textContent = String(bookmarks.length);
+  };
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+
+    if (!storageReady) {
+      report('Enable browser storage and reload before adding bookmarks, so existing saved links are not overwritten.', true);
+      return;
+    }
+
+    let bookmark: Bookmark;
+    try {
+      bookmark = createBookmark(input.value, bookmarks);
+    } catch (cause) {
+      input.setAttribute('aria-invalid', 'true');
+      report(cause instanceof Error ? cause.message : 'Could not add this bookmark. Please try again.', true);
+      input.focus();
+      return;
+    }
+
+    const next = [...bookmarks, bookmark];
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      report('Could not save your bookmark. Browser storage may be blocked or full. Your link is still in the field; enable storage and try again.', true);
+      return;
+    }
+
+    bookmarks = next;
+    render();
+    form.reset();
+    input.removeAttribute('aria-invalid');
+    input.focus();
+    report(`Saved ${bookmark.slug}. Your bookmark will be here next time.`);
   });
+
+  input.addEventListener('input', () => input.removeAttribute('aria-invalid'));
+
+  clearButton.addEventListener('click', () => {
+    if (!window.confirm('Clear all saved bookmarks from this browser?')) return;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      report('Could not clear browser storage. Your bookmarks have not been removed. Enable storage and try again.', true);
+      return;
+    }
+    bookmarks = [];
+    render();
+    input.focus();
+    report('All bookmarks cleared.');
+  });
+
+  // All storage access stays inside Astro's browser-only script boundary.
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEY);
+    storageReady = true;
+  } catch {
+    report('Could not read your bookmarks. Browser storage is unavailable; enable it and reload to restore saved links.', true);
+  }
+  const loaded = loadBookmarks(stored);
+  bookmarks = loaded.bookmarks;
+  render();
+  if (loaded.recovered) {
+    report('Saved data needed recovery. Invalid or duplicate entries were skipped; any valid bookmarks are shown below.', true);
+  }
+  addButton.disabled = !storageReady;
 </script>
